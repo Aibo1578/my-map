@@ -1,0 +1,102 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>マイマップ（青森スタート版）</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { height: 100vh; width: 100%; }
+        .popup-img { max-width: 250px; border-radius: 8px; margin-top: 10px; display: block; }
+        .popup-content { font-family: sans-serif; min-width: 150px; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+    // 1. 地図の初期設定（青森市役所付近を中心に設定）
+    // [緯度, 経度], ズームレベル(15は街中がよく見えるくらい)
+    const map = L.map('map').setView([40.82444, 140.74], 15);
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    // 2. ブラウザ内データベース(IndexedDB)の準備
+    let db;
+    const request = indexedDB.open("MyMapDB", 1);
+    request.onupgradeneeded = (e) => {
+        db = e.target.result;
+        db.createObjectStore("spots", { keyPath: "id", autoIncrement: true });
+    };
+    request.onsuccess = (e) => {
+        db = e.target.result;
+        displaySavedSpots(); 
+    };
+
+    // 3. 地図をクリックした時の処理
+    map.on('click', function(e) {
+        const memo = prompt("場所のメモを入力してください：");
+        if (!memo) return;
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        
+        fileInput.onchange = (event) => {
+            const file = event.target.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = (re) => {
+                const imgData = re.target.result; 
+                saveSpot(e.latlng.lat, e.latlng.lng, memo, imgData);
+            };
+            
+            if(file) {
+                reader.readAsDataURL(file); 
+            } else {
+                saveSpot(e.latlng.lat, e.latlng.lng, memo, null);
+            }
+        };
+        
+        if(confirm("写真を貼り付けますか？")) {
+            fileInput.click();
+        } else {
+            saveSpot(e.latlng.lat, e.latlng.lng, memo, null);
+        }
+    });
+
+    function saveSpot(lat, lng, memo, imgData) {
+        const transaction = db.transaction(["spots"], "readwrite");
+        const store = transaction.objectStore("spots");
+        const spot = { lat, lng, memo, imgData, date: new Date().toLocaleString() };
+        store.add(spot);
+        transaction.oncomplete = () => { addMarker(spot); };
+    }
+
+    function addMarker(spot) {
+        let content = `<div class="popup-content"><b>${spot.memo}</b><br><small>${spot.date}</small>`;
+        if (spot.imgData) {
+            content += `<img src="${spot.imgData}" class="popup-img">`;
+        }
+        content.innerHTML += `</div>`;
+        L.marker([spot.lat, spot.lng]).addTo(map).bindPopup(content);
+    }
+
+    function displaySavedSpots() {
+        const transaction = db.transaction(["spots"], "readonly");
+        const store = transaction.objectStore("spots");
+        store.openCursor().onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (cursor) {
+                addMarker(cursor.value);
+                cursor.continue();
+            }
+        };
+    }
+</script>
+</body>
+</html>
